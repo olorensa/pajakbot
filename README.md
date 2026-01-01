@@ -78,4 +78,4 @@ vercel.json: Konfigurasi deployment serverless Vercel.
 ⚖️ Penafian (Disclaimer)
 Chatbot ini dibuat untuk tujuan edukasi dan bantuan informasi awal mengenai UU HPP. Segala keputusan perpajakan tetap harus merujuk pada regulasi resmi DJP atau konsultan pajak profesional.
 
-Made with ❤️ by olorensa
+Made with ❤️ by olorensa"# pajakbot" 
