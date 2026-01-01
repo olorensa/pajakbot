@@ -2,36 +2,24 @@ import fs from "fs";
 import path from "path";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-/**
- * Gemini init (Vercel pakai env bawaan, JANGAN dotenv)
- */
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
- * Path data RAG (HARUS ada di repo)
+ * Perbaikan Path: Menggunakan path.resolve agar aman di Vercel
  */
-const dataPath = path.join(process.cwd(), "api", "rag-data.json");
-const cachePath = path.join(process.cwd(), "api", "embeddings-cache.json");
+const dataPath = path.resolve(process.cwd(), "api", "rag-data.json");
+const cachePath = path.resolve(process.cwd(), "api", "embeddings-cache.json");
 
-/**
- * Cache memory (aman untuk serverless)
- */
 let pdfChunks = [];
 let chunkEmbeddings = [];
 let initialized = false;
 
-/**
- * Init RAG sekali per cold start
- */
 function initRAG() {
   if (initialized) return;
 
-  if (!fs.existsSync(dataPath)) {
-    throw new Error("rag-data.json tidak ditemukan");
-  }
-
-  if (!fs.existsSync(cachePath)) {
-    throw new Error("embeddings-cache.json tidak ditemukan");
+  if (!fs.existsSync(dataPath) || !fs.existsSync(cachePath)) {
+    // Memberikan info lebih detail jika file hilang
+    throw new Error(`File JSON tidak ditemukan di path: ${dataPath}`);
   }
 
   pdfChunks = JSON.parse(fs.readFileSync(dataPath, "utf8"));
@@ -41,9 +29,6 @@ function initRAG() {
   console.log("✅ RAG loaded:", pdfChunks.length, "chunks");
 }
 
-/**
- * Fast cosine similarity
- */
 function cosineSimilarity(a, b) {
   let dot = 0, ma = 0, mb = 0;
   for (let i = 0; i < a.length; i++) {
@@ -54,19 +39,11 @@ function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(ma) * Math.sqrt(mb));
 }
 
-/**
- * Vercel Serverless Handler
- */
 export default async function handler(req, res) {
-  // ✅ Allow browser open
   if (req.method === "GET") {
-    return res.status(200).json({
-      status: "PajakAI API aktif",
-      method: "POST"
-    });
+    return res.status(200).json({ status: "PajakAI API aktif" });
   }
 
-  // ❌ Only POST allowed
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -79,19 +56,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Question kosong" });
     }
 
-    /**
-     * 1️⃣ Embedding pertanyaan
-     */
-    const embedModel = genAI.getGenerativeModel({
-      model: "text-embedding-004"
-    });
-
+    // 1️⃣ Embedding
+    const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
     const embed = await embedModel.embedContent(question);
     const queryVector = embed.embedding.values;
 
-    /**
-     * 2️⃣ Retrieval Top 3
-     */
+    // 2️⃣ Retrieval
     const context = pdfChunks
       .map((text, i) => ({
         text,
@@ -102,11 +72,9 @@ export default async function handler(req, res) {
       .map(x => x.text)
       .join("\n\n");
 
-    /**
-     * 3️⃣ Gemini 2.5 Flash
-     */
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash"
+    // 3️⃣ Gemini - PERBAIKAN NAMA MODEL
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash" // Gunakan 1.5-flash atau 2.0-flash-exp
     });
 
     const prompt = `
@@ -129,7 +97,7 @@ ${question}
     console.error("❌ API ERROR:", err);
     return res.status(500).json({
       error: "Server error",
-      details: err.message
+      details: err.message // Ini akan membantu kamu melihat error spesifik di browser
     });
   }
 }
