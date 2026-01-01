@@ -1,86 +1,109 @@
-import path from "path";
-import "dotenv/config";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import express from "express";
 import fs from "fs";
+import path from "path";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const router = express.Router();
+// ❌ JANGAN dotenv di Vercel
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// Path file (file ini HARUS ada di repo)
 const dataPath = path.join(process.cwd(), "api", "rag-data.json");
 const cachePath = path.join(process.cwd(), "api", "embeddings-cache.json");
 
 let pdfChunks = [];
 let chunkEmbeddings = [];
 
-// Inisialisasi Database RAG
-async function initializeRAG() {
-    try {
-        if (fs.existsSync(dataPath)) pdfChunks = JSON.parse(fs.readFileSync(dataPath, "utf8"));
-        if (fs.existsSync(cachePath)) chunkEmbeddings = JSON.parse(fs.readFileSync(cachePath, "utf8"));
-        console.log("🚀 Database RAG Siap!");
-    } catch (e) { console.error("Error init:", e); }
-}
-initializeRAG();
+// Init RAG (aman untuk serverless)
+function initRAG() {
+  if (pdfChunks.length > 0) return;
 
-// Similarity check yang dioptimalkan
-function fastCosineSimilarity(vecA, vecB) {
-    let dotProduct = 0, mA = 0, mB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        mA += vecA[i] * vecA[i];
-        mB += vecB[i] * vecB[i];
-    }
-    return dotProduct / (Math.sqrt(mA) * Math.sqrt(mB));
+  if (fs.existsSync(dataPath)) {
+    pdfChunks = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+  }
+
+  if (fs.existsSync(cachePath)) {
+    chunkEmbeddings = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+  }
+
+  console.log("✅ RAG loaded:", pdfChunks.length);
 }
 
-router.post("/", async (req, res) => {
-    try {
-        const { question } = req.body;
-        if (!question) return res.status(400).send("No question");
+// Cosine similarity
+function cosineSimilarity(a, b) {
+  let dot = 0, ma = 0, mb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    ma += a[i] ** 2;
+    mb += b[i] ** 2;
+  }
+  return dot / (Math.sqrt(ma) * Math.sqrt(mb));
+}
 
-        // 1. Embedding Pertanyaan
-        const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-        const resEmbed = await embedModel.embedContent(question);
-        const queryVector = resEmbed.embedding.values;
+export default async function handler(req, res) {
+  // ✅ HANDLE GET (biar buka di browser tidak 500)
+  if (req.method === "GET") {
+    return res.status(200).json({
+      status: "API Chat Aktif",
+      method: "POST"
+    });
+  }
 
-        // 2. Retrieval Konteks (Ambil 3 chunk terbaik untuk kecepatan maksimal)
-        const context = pdfChunks
-            .map((text, i) => ({ text, score: fastCosineSimilarity(queryVector, chunkEmbeddings[i]) }))
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 3) 
-            .map(item => item.text)
-            .join("\n\n");
+  // ❌ Tolak selain POST
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-        // 3. Menggunakan Model Gemini 2.5 Flash
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.5-flash" // Menggunakan model terbaru sesuai permintaan
-        });
-        
-        const prompt = `Anda adalah asisten pajak cerdas DJP. Jawab dengan sangat ringkas berdasarkan UU HPP.
-        Format wajib: 
-        1. Definisi singkat (1 paragraf)
-        2. ### Ciri-Ciri (bullet points)
-        3. ### Fungsi (bullet points)
-        4. ### Jenis Pajak (Tabel Markdown: Jenis | Penjelasan)
-        5. ### Alokasi Pendapatan
-        
-        Sertakan NIK=NPWP atau Pajak Karbon hanya jika relevan dengan konteks.
-        
-        Dokumen Konteks: ${context}
-        Pertanyaan User: ${question}`;
+  try {
+    initRAG();
 
-        // Generate konten dengan model 2.5 Flash
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const fullText = response.text();
-
-        res.json({ answer: fullText });
-
-    } catch (error) {
-        console.error("API Error:", error);
-        res.status(500).json({ error: "Terjadi kesalahan", details: error.message });
+    const { question } = req.body;
+    if (!question) {
+      return res.status(400).json({ error: "Question kosong" });
     }
-});
 
-export default router;
+    // 1️⃣ Embedding
+    const embedModel = genAI.getGenerativeModel({
+      model: "text-embedding-004"
+    });
+    const embed = await embedModel.embedContent(question);
+    const queryVector = embed.embedding.values;
+
+    // 2️⃣ Retrieval (Top 3)
+    const context = pdfChunks
+      .map((text, i) => ({
+        text,
+        score: cosineSimilarity(queryVector, chunkEmbeddings[i])
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(x => x.text)
+      .join("\n\n");
+
+    // 3️⃣ Gemini 2.5 Flash
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash"
+    });
+
+    const prompt = `
+Anda adalah asisten pajak DJP berbasis UU HPP.
+Jawab ringkas dan terstruktur.
+
+Dokumen Konteks:
+${context}
+
+Pertanyaan:
+${question}
+`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+
+    return res.status(200).json({ answer: text });
+
+  } catch (err) {
+    console.error("API ERROR:", err);
+    return res.status(500).json({
+      error: "Server error",
+      details: err.message
+    });
+  }
+}
