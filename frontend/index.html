@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PajakAI | Smart Assistant</title>
   
-  <link rel="stylesheet" href="/css/chatbot-style.css">
+  <link rel="stylesheet" href="./css/chatbot-style.css">
   
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -62,7 +62,7 @@
   // Inisialisasi ikon Lucide
   lucide.createIcons();
 
-  // Memastikan input 'Enter' bisa mengirim pesan
+  // Memastikan input 'Enter' memanggil fungsi sendChat yang ada di chatbot-loader.js
   document.getElementById('user-input').addEventListener('keypress', function (e) {
     if (e.key === 'Enter') {
       sendChat();
