@@ -1,0 +1,19 @@
+{
+  "name": "25_rag_chatbot_for_websites_with_gemini",
+  "version": "1.0.0",
+  "description": "",
+  "main": "crawler.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.10.0",
+    "cheerio": "^1.1.0",
+    "puppeteer": "^24.12.1",
+    "turndown": "^7.2.0"
+  }
+}

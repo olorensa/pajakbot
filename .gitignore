@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# old_revisions
+old_revisions/
+
+# Local environment variables
+.env
+
+# The indexer script (it's a local tool)
+indexer.js
+
+# Log files
+npm-debug.log*
+
+# Web page chat interface files
+chatbot-loader.js
+
+.vercel
