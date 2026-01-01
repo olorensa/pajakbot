@@ -1,28 +1,11 @@
 {
-  "version": 2,
   "functions": {
-    "api/chat.js": {
-      "memory": 512,
-      "maxDuration": 10,
-      "includeFiles": "api/rag-data.json"
+    "api/*.js": {
+      "runtime": "nodejs18.x"
     }
   },
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/chat.js"
-    },
-    {
-      "source": "/js/(.*)",
-      "destination": "/frontend/js/$1"
-    },
-    {
-      "source": "/css/(.*)",
-      "destination": "/frontend/css/$1"
-    },
-    {
-      "source": "/((?!api/).*)",
-      "destination": "/frontend/$1"
-    }
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }

@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import chatRouter from "./api/chat.js";
+import { chatAnswer } from "./lib/chatCore.js";
 
 const app = express();
 const PORT = 3000;
@@ -11,18 +11,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "frontend")));
 
-app.use("/api/chat", chatRouter);
+// ✅ STATIC PUBLIC
+app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "frontend", "index.html"));
+// ✅ API CHAT
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { question } = req.body;
+    const answer = await chatAnswer(question);
+    res.json({ answer });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-process.on('unhandledRejection', (reason) => {
-  console.error('⚠️ Unhandled Rejection:', reason);
-});
-
+// ❌ TIDAK PERLU app.get("/")
 app.listen(PORT, () => {
-  console.log(`🚀 Server berjalan di http://localhost:${PORT}`);
+  console.log(`🚀 Local running: http://localhost:${PORT}`);
 });
