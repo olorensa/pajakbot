@@ -1,122 +1,83 @@
 import fs from "fs";
 import path from "path";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import dotenv from "dotenv";
 
-/**
- * Inisialisasi Google Generative AI
- */
+dotenv.config();
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const EMBEDDING_MODEL = "text-embedding-004";
+const CHAT_MODEL = "gemini-2.5-flash"; // Menggunakan 1.5-flash untuk stabilitas
 
-/**
- * Konfigurasi Path: 
- * Menggunakan process.cwd() adalah cara standar di Vercel untuk mengakses root project.
- */
-const dataPath = path.join(process.cwd(), "api", "rag-data.json");
-const cachePath = path.join(process.cwd(), "api", "embeddings-cache.json");
+const VECTOR_DB_PATH = path.join(process.cwd(), "data", "vectors.json");
 
-let pdfChunks = [];
-let chunkEmbeddings = [];
-let initialized = false;
-
-/**
- * Fungsi initRAG: 
- * Memastikan data hanya dimuat sekali per siklus hidup serverless instance.
- */
-function initRAG() {
-  if (initialized) return;
-
-  if (!fs.existsSync(dataPath)) {
-    throw new Error(`Kritis: File rag-data.json tidak ditemukan di ${dataPath}`);
-  }
-  if (!fs.existsSync(cachePath)) {
-    throw new Error(`Kritis: File embeddings-cache.json tidak ditemukan di ${cachePath}`);
-  }
-
-  try {
-    pdfChunks = JSON.parse(fs.readFileSync(dataPath, "utf8"));
-    chunkEmbeddings = JSON.parse(fs.readFileSync(cachePath, "utf8"));
-    initialized = true;
-    console.log("✅ RAG system initialized");
-  } catch (error) {
-    throw new Error("Gagal parsing file JSON: " + error.message);
-  }
-}
-
-/**
- * Logika Cosine Similarity
- */
+// Fungsi menghitung kemiripan teks (Cosine Similarity)
 function cosineSimilarity(a, b) {
-  let dot = 0, ma = 0, mb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    ma += a[i] * a[i];
-    mb += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(ma) * Math.sqrt(mb));
+  const dot = a.reduce((sum, v, i) => sum + v * b[i], 0);
+  const normA = Math.sqrt(a.reduce((sum, v) => sum + v * v, 0));
+  const normB = Math.sqrt(b.reduce((sum, v) => sum + v * v, 0));
+  return dot / (normA * normB);
 }
 
-/**
- * Serverless Handler
- */
-export default async function handler(req, res) {
-  // 1. Validasi Method
-  if (req.method === "GET") {
-    return res.status(200).json({ status: "PajakAI API Aktif" });
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
+export default async function chatHandler(req, res) {
   try {
-    // 2. Pastikan data RAG termuat
-    initRAG();
+    // SINKRONISASI: Mengambil 'message' dari body request frontend
+    // Menambahkan fallback agar tetap menerima data jika dikirim sebagai 'question'
+    const message = req.body.message || req.body.question; 
 
-    const { question } = req.body;
-    if (!question || question.trim() === "") {
-      return res.status(400).json({ error: "Pertanyaan kosong" });
+    if (!message) {
+      console.warn("⚠️ Warning: Request diterima tapi pesan kosong.");
+      return res.status(400).json({ error: "Pesan tidak boleh kosong" });
     }
 
-    // 3. Embedding Pertanyaan
-    const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-    const embed = await embedModel.embedContent(question);
-    const queryVector = embed.embedding.values;
+    // 1. Ambil Embedding untuk pertanyaan user
+    const modelEmbed = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
+    const resultEmbed = await modelEmbed.embedContent(message);
+    const qEmbedding = resultEmbed.embedding.values;
 
-    // 4. Retrieval (Top 3 Context)
-    const context = pdfChunks
-      .map((text, i) => ({
-        text,
-        score: cosineSimilarity(queryVector, chunkEmbeddings[i])
-      }))
+    // 2. Baca Database Vector dari file permanen
+    if (!fs.existsSync(VECTOR_DB_PATH)) {
+      console.error("❌ Database vektor tidak ditemukan di:", VECTOR_DB_PATH);
+      throw new Error("Database pengetahuan belum siap. Silahkan jalankan ingest satu kali.");
+    }
+    
+    const vectors = JSON.parse(fs.readFileSync(VECTOR_DB_PATH, "utf8"));
+    
+    // Cari 5 potongan teks yang paling relevan dengan pertanyaan
+    const ranked = vectors
+      .map(v => ({ ...v, score: cosineSimilarity(qEmbedding, v.embedding) }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .map(x => x.text)
-      .join("\n\n");
+      .slice(0, 5);
 
-    // 5. Generate Jawaban (Gemini 2.5 Flash sesuai dashboard Anda)
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const context = ranked.map(r => r.content).join("\n---\n");
 
-    const prompt = `
-Anda adalah asisten pajak DJP berbasis UU HPP. 
-Jawablah dengan ringkas, jelas, dan terstruktur berdasarkan konteks berikut.
+    // 3. Prompt Pintar: Menggunakan 'context' agar AI menjawab berdasarkan dokumen
+// Ganti bagian prompt di dalam api/chat.js Anda dengan ini:
+const prompt = `
+  Anda adalah PajakAI Assistant. Berikan jawaban yang terstruktur, informatif, dan langsung ke inti permasalahan.
 
-Konteks Dokumen:
-${context}
+  DATA REFERENSI:
+  ${context}
 
-Pertanyaan User:
-${question}
+  INSTRUKSI FORMAT JAWABAN:
+  1. JANGAN PERNAH menyebutkan "Berdasarkan dokumen..." atau "Informasi ini tidak ada".
+  2. Gunakan gaya penulisan yang Anda berikan: definisikan secara formal, berikan penjelasan sederhana, gunakan poin-poin untuk ciri-ciri dan fungsi, serta gunakan tabel jika perlu.
+  3. Integrasikan detail teknis dari DATA REFERENSI (seperti PPN, Penagihan di Bab IV, atau Keberatan di Bab V) ke dalam penjelasan fungsi atau jenis pajak agar data dokumen tetap terpakai secara profesional.
+  4. Pastikan jawaban terlihat bersih dan mudah dibaca (scannable).
+
+  PERTANYAAN USER: ${message}
 `;
-
-    const result = await model.generateContent(prompt);
-    const answer = result.response.text();
-
-    return res.status(200).json({ answer });
-
-  } catch (err) {
-    console.error("❌ API ERROR:", err);
-    return res.status(500).json({
-      error: "Terjadi kesalahan internal",
-      message: err.message
+    const modelChat = genAI.getGenerativeModel({ model: CHAT_MODEL });
+    const resultChat = await modelChat.generateContent(prompt);
+    
+    // Kirim balasan sukses ke frontend
+    res.json({ 
+      status: "success", 
+      reply: resultChat.response.text() 
     });
+
+  } catch (error) {
+    console.error("❌ RAG Error:", error.message);
+    res.status(500).json({ error: "Gagal memproses permintaan", details: error.message });
   }
 }

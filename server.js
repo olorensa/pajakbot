@@ -1,29 +1,36 @@
+import "dotenv/config"; // Harus di baris paling atas!
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import chatHandler from "./api/chat.js";
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-// fix __dirname di ES module
+// Setup __dirname untuk ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// serve static files
+// Middleware
+app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// parse JSON
-app.use(express.json());
-
-// API local (optional: forward ke api/chat.js)
-import chatHandler from "./api/chat.js";
+// Routing API
 app.post("/api/chat", chatHandler);
 
-// serve index.html
-app.get("*", (req, res) => {
+// SPA Fallback: Mengarahkan semua request tak dikenal ke index.html
+app.get("*all", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Local server running at http://localhost:${PORT}`);
+  console.log(`---`);
+  console.log(`✅ Server running at http://localhost:${PORT}`);
+  // Cek apakah key terbaca saat startup
+  if (process.env.GEMINI_API_KEY) {
+    console.log(`🔑 API Key terdeteksi (Karakter awal: ${process.env.GEMINI_API_KEY.substring(0, 5)}...)`);
+  } else {
+    console.log(`❌ ERROR: API Key TIDAK ditemukan di file .env`);
+  }
+  console.log(`---`);
 });

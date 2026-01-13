@@ -1,28 +1,24 @@
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { GoogleGenAI } from "@google/genai";
+// PERBAIKAN: Gunakan nama library yang benar sesuai node_modules kamu
+import { GoogleGenerativeAI } from "@google/generative-ai"; 
 import { createRequire } from "module";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-/* =====================
-   PDF PARSER (CJS)
-===================== */
 const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
 
-/* =====================
-   CONFIG
-===================== */
+// 1. Validasi API Key
 if (!process.env.GEMINI_API_KEY) {
-  console.error("❌ GEMINI_API_KEY belum di-set");
+  console.error("❌ GEMINI_API_KEY belum di-set di .env");
   process.exit(1);
 }
 
-const genAI = new GoogleGenAI(process.env.GEMINI_API_KEY);
-
+// PERBAIKAN: Inisialisasi sesuai dokumentasi @google/generative-ai
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const EMBEDDING_MODEL = "text-embedding-004";
 
 const ROOT = process.cwd();
@@ -33,33 +29,37 @@ const VECTOR_DB_PATH = path.join(ROOT, "data", "vectors.json");
    HELPERS
 ===================== */
 async function embedText(text) {
-  const result = await genAI.models.embedContent({
-    model: EMBEDDING_MODEL,
-    contents: [
-      {
-        parts: [{ text }],
-      },
-    ],
-  });
-
-  return result.embeddings[0].values;
+  try {
+    // PERBAIKAN: Cara memanggil embedding yang benar
+    const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
+    const result = await model.embedContent(text);
+    return result.embedding.values;
+  } catch (err) {
+    console.error("❌ Gagal embedding:", err.message);
+    throw err;
+  }
 }
 
-function chunkText(text, size = 800, overlap = 100) {
+function chunkText(text, size = 1000, overlap = 200) {
   const chunks = [];
   let i = 0;
+  // Bersihkan teks dari karakter aneh hasil PDF parse
+  const cleanText = text.replace(/\s+/g, ' ').trim();
 
-  while (i < text.length) {
-    chunks.push(text.slice(i, i + size));
+  while (i < cleanText.length) {
+    chunks.push(cleanText.slice(i, i + size));
     i += size - overlap;
   }
-
   return chunks;
 }
 
 function loadVectors() {
   if (!fs.existsSync(VECTOR_DB_PATH)) return [];
-  return JSON.parse(fs.readFileSync(VECTOR_DB_PATH, "utf8"));
+  try {
+    return JSON.parse(fs.readFileSync(VECTOR_DB_PATH, "utf8"));
+  } catch (e) {
+    return [];
+  }
 }
 
 function saveVectors(vectors) {
@@ -71,17 +71,17 @@ function saveVectors(vectors) {
    INGEST PDF
 ===================== */
 async function ingestPDF(filePath) {
+  console.log(`⏳ Memproses: ${path.basename(filePath)}...`);
   const buffer = fs.readFileSync(filePath);
   const data = await pdfParse(buffer);
 
   const chunks = chunkText(data.text);
   const vectors = loadVectors();
 
-  console.log(`📄 ${path.basename(filePath)} → ${chunks.length} chunks`);
+  console.log(`📄 Terbagi menjadi ${chunks.length} bagian (chunks)`);
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
-  
     const embedding = await embedText(chunk);
   
     vectors.push({
@@ -91,11 +91,10 @@ async function ingestPDF(filePath) {
       embedding,
     });
   
-    if (i % 10 === 0) {
-      console.log(`   ⏳ ${i + 1}/${chunks.length} embeddings`);
+    if ((i + 1) % 5 === 0 || i === chunks.length - 1) {
+      console.log(`   ✅ Selesai ${i + 1}/${chunks.length} koordinat vektor`);
     }
   }
-  
 
   saveVectors(vectors);
 }
@@ -105,7 +104,7 @@ async function ingestPDF(filePath) {
 ===================== */
 async function run() {
   if (!fs.existsSync(DOCS_DIR)) {
-    console.error("❌ Folder /documents tidak ada");
+    console.error("❌ Folder /documents tidak ditemukan");
     return;
   }
 
@@ -114,18 +113,18 @@ async function run() {
     .filter((f) => f.toLowerCase().endsWith(".pdf"));
 
   if (!files.length) {
-    console.error("❌ Tidak ada PDF di /documents");
+    console.error("❌ Masukkan file PDF ke dalam folder /documents terlebih dahulu");
     return;
   }
 
-  console.log("📂 Documents:", files);
+  console.log("📂 Ditemukan dokumen:", files);
 
   for (const file of files) {
     await ingestPDF(path.join(DOCS_DIR, file));
   }
 
-  console.log("✅ PDF ingestion complete");
-  console.log("📦 Vector DB:", VECTOR_DB_PATH);
+  console.log("\n✨ PROSES SELESAI!");
+  console.log("📦 Database vektor disimpan di:", VECTOR_DB_PATH);
 }
 
 run();
